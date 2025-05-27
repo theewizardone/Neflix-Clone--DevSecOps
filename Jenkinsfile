@@ -1,73 +1,91 @@
-pipeline{
+pipeline {
     agent any
-    tools{
+
+    tools {
         jdk 'jdk17'
         nodejs 'Node16'
     }
+
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
+        NVD_API_KEY = credentials('5d8ea360-50dd-43c5-9c1d-92ebbe6d36ba') // No trailing space!
     }
+
     stages {
-        stage('clean workspace'){
-            steps{
+        stage('Clean Workspace') {
+            steps {
                 cleanWs()
             }
         }
-        stage('Checkout from Git'){
-            steps{
+
+        stage('Checkout from Git') {
+            steps {
                 git branch: 'main', url: 'https://github.com/theewizardone/Neflix-Clone--DevSecOps.git'
             }
         }
-        stage("Sonarqube Analysis "){
-            steps{
+
+        stage('SonarQube Analysis') {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Netflix \
-                    -Dsonar.projectKey=Netflix '''
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=Netflix \
+                        -Dsonar.projectKey=Netflix
+                    '''
                 }
             }
         }
-        stage("quality gate"){
-           steps {
+
+        stage('Quality Gate') {
+            steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
                 }
-            } 
+            }
         }
+
         stage('Install Dependencies') {
             steps {
-                sh "npm install"
+                sh 'npm install'
             }
         }
+
         stage('OWASP FS SCAN') {
             steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey=${NVD_API_KEY}", odcInstallation: 'DP-Check'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-        stage('TRIVY FS SCAN') {
+
+        stage('Trivy FS Scan') {
             steps {
-                sh "trivy fs . > trivyfs.txt"
+                sh 'trivy fs . > trivyfs.txt'
             }
         }
-        stage("Docker Build & Push"){
-            steps{
-                script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){   
-                       sh "docker build --build-arg TMDB_V3_API_KEY=<yourtmdbapikey> -t netflix ."
-                       sh "docker tag netflix nasi101/netflix:latest "
-                       sh "docker push nasi101/netflix:latest "
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh '''
+                            docker build --build-arg TMDB_V3_API_KEY=489362a14e0518180c51d1392ba8a3da -t netflix .
+                            docker tag netflix theewizardone/netflix:latest
+                            docker push theewizardone/netflix:latest
+                        '''
                     }
                 }
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image nasi101/netflix:latest > trivyimage.txt" 
+
+        stage('Trivy Image Scan') {
+            steps {
+                sh 'trivy image theewizardone/netflix:latest > trivyimage.txt'
             }
         }
-        stage('Deploy to container'){
-            steps{
-                sh 'docker run -d -p 8081:80 nasi101/netflix:latest'
+
+        stage('Deploy to Container') {
+            steps {
+                sh 'docker run -d -p 8081:80 theewizardone/netflix:latest'
             }
         }
         stage('Deploy to kubernets'){
