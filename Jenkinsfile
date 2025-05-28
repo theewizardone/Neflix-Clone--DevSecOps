@@ -8,7 +8,7 @@ pipeline {
 
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('5d8ea360-50dd-43c5-9c1d-92ebbe6d36ba') // No trailing space!
+        NVD_API_KEY = credentials('nvd-api-key')
     }
 
     stages {
@@ -27,15 +27,10 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=Netflix \
-                        -Dsonar.projectKey=Netflix
-                    '''
+                    sh "$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Netflix -Dsonar.projectKey=Netflix"
                 }
             }
         }
-
         stage('Quality Gate') {
             steps {
                 script {
@@ -43,20 +38,19 @@ pipeline {
                 }
             }
         }
-
         stage('Install Dependencies') {
             steps {
                 sh 'npm install'
             }
         }
-
-        stage('OWASP FS SCAN') {
-            steps {
-                dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey=${NVD_API_KEY}", odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
+       stage('OWASP FS SCAN') {
+    steps {
+        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+            dependencyCheck additionalArguments: "--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey=$NVD_API_KEY", odcInstallation: 'DP-Check'
+            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
         }
-
+    }
+}
         stage('Trivy FS Scan') {
             steps {
                 sh 'trivy fs . > trivyfs.txt'
@@ -64,30 +58,32 @@ pipeline {
         }
 
         stage('Docker Build & Push') {
-            steps {
-                script {
-                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
-                        sh '''
-                            docker build --build-arg TMDB_V3_API_KEY=489362a14e0518180c51d1392ba8a3da -t netflix .
-                            docker tag netflix theewizardone/netflix:latest
-                            docker push theewizardone/netflix:latest
-                        '''
-                    }
+    steps {
+        script {
+            withCredentials([string(credentialsId: 'TMDB_V3_API_KEY', variable: 'TMDB_API_KEY')]) {
+                withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                    sh '''
+                        docker build --build-arg TMDB_V3_API_KEY=$TMDB_API_KEY -t netflix .
+                        docker tag netflix theewizardorne/netflix:latest
+                        docker push theewizardorne/netflix:latest
+                    '''
                 }
             }
         }
-
+    }
+}
         stage('Trivy Image Scan') {
             steps {
-                sh 'trivy image theewizardone/netflix:latest > trivyimage.txt'
+                sh 'trivy image theewizardorne/netflix:latest > trivyimage.txt'
             }
         }
 
         stage('Deploy to Container') {
             steps {
-                sh 'docker run -d -p 8081:80 theewizardone/netflix:latest'
+                sh 'docker run -d -p 8086:80 theewizardorne/netflix:latest'
             }
         }
+    }
         stage('Deploy to kubernets'){
             steps{
                 script{
@@ -104,6 +100,8 @@ pipeline {
     }
     post {
      always {
+         archiveArtifacts artifacts: '**/dependency-check-report.xml', allowEmptyArchive: true
+      dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
         emailext attachLog: true,
             subject: "'${currentBuild.result}'",
             body: "Project: ${env.JOB_NAME}<br/>" +
@@ -111,6 +109,7 @@ pipeline {
                 "URL: ${env.BUILD_URL}<br/>",
             to: 'alfoncemorara412@gmail.com',                                //change mail here
             attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+           echo 'Pipeline completed.'
         }
     }
 }
