@@ -132,7 +132,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        sh 'docker run -d -p 8093:80 theewizardorne/netflix:latest'
+                        sh 'docker run -d -p 8094:80 theewizardorne/netflix:latest'
                     } catch (err) {
                         echo "Deployment failed: ${err.getMessage()}"
                     }
@@ -140,11 +140,14 @@ pipeline {
             }
         }
 
-        stage('Deploy to kubernets') {
+        stage('Deploy to kubernetes') {
             steps {
                 script {
                     dir('Kubernetes') {
-                        withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                        withKubeConfig(
+                            caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s',
+                            namespace: '', restrictKubeConfigAccess: false, serverUrl: ''
+                        ) {
                             sh 'kubectl apply -f deployment.yml'
                             sh 'kubectl apply -f service.yml'
                         }
@@ -153,7 +156,7 @@ pipeline {
             }
         }
     } 
-    
+
     post {
         always {
             archiveArtifacts artifacts: '**/dependency-check-report.xml', allowEmptyArchive: true
@@ -166,10 +169,10 @@ pipeline {
                       "Build Number: ${env.BUILD_NUMBER}<br/>" +
                       "URL: ${env.BUILD_URL}<br/>",
                 to: 'alfoncemorara412@gmail.com',
+                mimeType: 'text/html',
                 attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
             echo 'Pipeline completed.'
         }
     }
-}
-
+} 
     
